@@ -14,16 +14,17 @@ async function call<T>(url: string, init: RequestInit): Promise<T> {
   return data;
 }
 
-/** Retries once after a pause: free tiers sometimes answer 429 for a few seconds. */
+/** Retries with growing pauses: free tiers answer "rate limited" for a few seconds at a time. */
 async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (e) {
-    await new Promise((r) => setTimeout(r, 4000));
+  const waits = [5000, 15000, 30000];
+  for (let i = 0; ; i++) {
     try {
       return await fn();
-    } catch {
-      throw e;
+    } catch (e) {
+      const msg = (e as Error).message;
+      const retryable = /limit|429|rate|overloaded|timeout|temporar|50\d|network|fetch/i.test(msg);
+      if (!retryable || i >= waits.length) throw e;
+      await new Promise((r) => setTimeout(r, waits[i]));
     }
   }
 }

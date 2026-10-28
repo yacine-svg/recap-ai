@@ -16,6 +16,7 @@ import type {
 } from "@/lib/types";
 import { analyst, languageRule, reviser, scout, tutor, verifier, writer } from "./agents";
 import { detectChapters, pickKeyMoments } from "./segment";
+import { LexicalIndex } from "./lexical";
 import { buildWindows } from "./text";
 import { parseVector, topK, toPgVector } from "./vector";
 
@@ -60,6 +61,12 @@ async function loadWindows(ctx: Ctx): Promise<EmbeddedWindow[]> {
   }));
 }
 
+/** Vectors for queries (focus question, claims) in the same space as the stored windows. */
+async function queryVectors(ctx: Ctx, windows: EmbeddedWindow[], texts: string[]): Promise<number[][]> {
+  if (ctx.recap.transcript?.index === "gemini") return embed(texts, "RETRIEVAL_QUERY");
+  return new LexicalIndex(windows.map((w) => w.text)).vectors(texts);
+}
+
 const lang = (r: Recap) => languageRule(r.output_language, r.transcript?.language ?? "");
 
 /* ---------- stages ---------- */
@@ -69,10 +76,9 @@ async function indexTranscript(ctx: Ctx): Promise<Update> {
   const segments = ctx.recap.transcript?.segments ?? [];
   const windows = buildWindows(segments);
   if (!windows.length) throw new Error("The transcript is empty: no speech was detected in this video.");
-  const vectors = await embed(
-    windows.map((w) => w.text),
-    "RETRIEVAL_DOCUMENT",
-  );
+  const mode = env.embeddingsProvider();
+  const texts = windows.map((w) => w.text);
+  const vectors = mode === "gemini" ? await embed(texts, "RETRIEVAL_DOCUMENT") : new LexicalIndex(texts).vectors(texts);
   await ctx.db.from("recap_windows").delete().eq("recap_id", ctx.recap.id);
   const rows = windows.map((w, i) => ({
     recap_id: ctx.recap.id,
@@ -87,9 +93,16 @@ async function indexTranscript(ctx: Ctx): Promise<Update> {
     if (error) throw new Error(`Could not save transcript index: ${error.message}`);
   }
   return {
+    transcript: { ...ctx.recap.transcript!, index: mode },
     trace: [
       ...ctx.recap.trace,
-      trace("Indexer", "embedding", t0, `Split ${segments.length} segments into ${windows.length} windows and embedded them (768-d)`, env.geminiEmbedModel()),
+      trace(
+        "Indexer",
+        "embedding",
+        t0,
+        `Split ${segments.length} segments into ${windows.length} windows and vectorised them (768-d, ${mode === "gemini" ? "neural embeddings" : "TF-IDF unigrams + bigrams with the hashing trick"})`,
+        mode === "gemini" ? env.geminiEmbedModel() : "local TF-IDF",
+      ),
     ],
   };
 }
@@ -136,7 +149,7 @@ async function analyze(ctx: Ctx): Promise<Update> {
   const t0 = Date.now();
   const windows = await loadWindows(ctx);
   const chapters = ctx.recap.chapters ?? [];
-  const focusVec = ctx.recap.focus ? (await embed([ctx.recap.focus], "RETRIEVAL_QUERY"))[0] : undefined;
+  const focusVec = ctx.recap.focus ? (await queryVectors(ctx, windows, [ctx.recap.focus]))[0] : undefined;
   const duration = ctx.recap.duration_sec ?? 0;
   const k = Math.min(10, Math.max(4, Math.round(duration / 360) + 3));
   const ranges = chapters.map((c) => ({ from: c.windowIds[0], to: c.windowIds[c.windowIds.length - 1] }));
@@ -182,7 +195,7 @@ async function write(ctx: Ctx): Promise<Update> {
   let focusPassages: { start: number; text: string }[] = [];
   if (ctx.recap.focus) {
     const windows = await loadWindows(ctx);
-    const q = (await embed([ctx.recap.focus], "RETRIEVAL_QUERY"))[0];
+    const q = (await queryVectors(ctx, windows, [ctx.recap.focus]))[0];
     focusPassages = topK(
       q,
       windows.map((w) => w.embedding),
@@ -239,17 +252,18 @@ async function verify(ctx: Ctx): Promise<Update> {
 
   // 1. retrieve the 3 transcript windows closest to each claim
   const evidenceFor = async (cs: Claim[]) => {
-    const vecs = await embed(
+    const vecs = await queryVectors(
+      ctx,
+      windows,
       cs.map((c) => c.text),
-      "RETRIEVAL_QUERY",
     );
-    return new Map(cs.map((c, i) => [c.id, topK(vecs[i], matrix, 3).map((h) => windows[h.index])]));
+    return new Map(cs.map((c, i) => [c.id, topK(vecs[i], matrix, 2).map((h) => windows[h.index])]));
   };
   const evidence = await evidenceFor(claims);
 
   // 2. judge every claim (batches of 8, 3 batches at a time)
   const judge = async (cs: Claim[]) => {
-    const results = await runInBatches(cs, 8, 3, (batch) =>
+    const results = await runInBatches(cs, 5, 1, (batch) =>
       verifier(batch.map((c) => ({ id: c.id, text: c.text, evidence: evidence.get(c.id) ?? [] }))),
     );
     const merged = new Map<string, { verdict: Verdict; evidenceWindowId: number }>();
@@ -272,7 +286,7 @@ async function verify(ctx: Ctx): Promise<Update> {
   let revised = 0;
   let reviserModel: string | undefined;
   if (rejected.length) {
-    const fixes = await runInBatches(rejected, 10, 2, (batch) =>
+    const fixes = await runInBatches(rejected, 6, 1, (batch) =>
       reviser(
         batch.map((c) => ({ id: c.id, text: c.text, verdict: c.verdict as Verdict, evidence: evidence.get(c.id) ?? [] })),
         lang(ctx.recap),

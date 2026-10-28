@@ -8,7 +8,7 @@ export type Stage = (typeof STAGES)[number];
 export type Status = Stage | "error";
 
 export type Segment = { start: number; end: number; text: string };
-export type Transcript = { language: string; segments: Segment[] };
+export type Transcript = { language: string; segments: Segment[]; index?: "local" | "gemini" };
 
 /** ~40 s slice of the transcript, the unit we embed and retrieve. */
 export type TranscriptWindow = { idx: number; start: number; end: number; text: string };

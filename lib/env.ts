@@ -10,6 +10,10 @@ export const env = {
   groqFastModel: () => read("GROQ_FAST_MODEL", "openai/gpt-oss-20b"),
   geminiLlmModel: () => read("GEMINI_LLM_MODEL", "gemini-3.8-flash"),
   geminiEmbedModel: () => read("GEMINI_EMBED_MODEL", "gemini-embedding-001"),
+  /** "local" (TF-IDF hashing, free, no API) or "gemini" (neural embeddings, needs a Gemini key with access). */
+  embeddingsProvider: () => (read("EMBEDDINGS_PROVIDER", "local") === "gemini" ? "gemini" : "local") as "local" | "gemini",
+  /** YouTube links are read by Gemini, so they need a usable Gemini key. */
+  youtubeEnabled: () => !!read("GEMINI_API_KEY") && read("YOUTUBE", "on") !== "off",
   dailyLimit: () => parseInt(read("RECAP_DAILY_LIMIT", "3"), 10) || 3,
   maxMinutes: () => parseInt(read("RECAP_MAX_MINUTES", "60"), 10) || 60,
 };

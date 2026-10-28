@@ -24,7 +24,7 @@ export async function scout(input: {
 }) {
   const texts = squeeze(
     input.chapters.map((c) => c.text),
-    48000,
+    18000, // Groq free plan: 8k tokens per minute per model, so the prompt stays ~5k tokens
   );
   const body = input.chapters
     .map((c, i) => `### Chapter ${c.index} ${at(c.start)}–${at(c.end)}\n${texts[i]}`)
@@ -34,6 +34,8 @@ export async function scout(input: {
     `You are the Scout agent of a video summarisation system. The transcript has already been split into chapters by topic-shift detection. For each chapter, write a short specific title (max 8 words, no numbering) and a 1–2 sentence summary of what is actually said. Also give the whole video a short descriptive title. ${input.lang}
 Return JSON: {"title": string, "chapters": [{"index": number, "title": string, "summary": string}]}`,
     body,
+    0.2,
+    2000,
   );
   const d = obj(data);
   const byIndex = new Map(arr(d.chapters).map((c) => [num(obj(c).index, -1), obj(c)]));
@@ -56,12 +58,16 @@ export async function analyst(input: {
   lang: string;
 }) {
   const outline = input.chapters.map((c) => `- ${at(c.start)} ${c.title}: ${c.summary}`).join("\n");
-  const moments = input.moments.map((m) => `<moment windowId="${m.windowId}" time="${formatTime(m.start)}">\n${m.text}\n</moment>`).join("\n");
+  const moments = input.moments
+    .map((m) => `<moment windowId="${m.windowId}" time="${formatTime(m.start)}">\n${m.text.slice(0, 900)}\n</moment>`)
+    .join("\n");
   const { data, model } = await askJSON<unknown>(
     "long",
     `You are the Analyst agent. You receive the outline of a video and its most representative passages (selected by embedding centrality and diversity). For each passage: quote its most important sentence word for word (max 30 words, original language) and explain in one sentence why it matters. Then list the key concepts the video defines or relies on (max 12), each with a one-sentence definition grounded in the passages, and the windowId where it appears. ${input.focus ? `The viewer specifically wants: "${input.focus}". Favour what serves that.` : ""} ${input.lang}
 Return JSON: {"moments": [{"windowId": number, "quote": string, "why": string}], "concepts": [{"term": string, "definition": string, "windowId": number}]}`,
     `OUTLINE\n${outline}\n\nPASSAGES\n${moments}`,
+    0.2,
+    2500,
   );
   const d = obj(data);
   return {
@@ -110,7 +116,7 @@ export async function writer(input: {
   ];
   if (input.focusPassages.length) {
     ctx.push("", "PASSAGES MOST RELEVANT TO THE VIEWER'S QUESTION");
-    ctx.push(...squeeze(input.focusPassages.map((p) => `${at(p.start)} ${p.text}`), 16000));
+    ctx.push(...squeeze(input.focusPassages.map((p) => `${at(p.start)} ${p.text}`), 6000));
   }
   const { data, model } = await askJSON<unknown>(
     "long",
@@ -120,6 +126,7 @@ Rules: every claim is ONE self-contained sentence that can be checked against th
 Return JSON: {"tldr": "2-3 sentences", "sections": [{"heading": string, "claims": [string]}]}`,
     ctx.join("\n"),
     0.3,
+    3000,
   );
   const d = obj(data);
   return {
@@ -143,7 +150,7 @@ export async function verifier(
     .map(
       (it) =>
         `<claim id="${it.id}">${it.text}</claim>\n${it.evidence
-          .map((w) => `<evidence windowId="${w.idx}" time="${formatTime(w.start)}">${w.text}</evidence>`)
+          .map((w) => `<evidence windowId="${w.idx}" time="${formatTime(w.start)}">${w.text.slice(0, 700)}</evidence>`)
           .join("\n")}`,
     )
     .join("\n\n");
@@ -157,6 +164,7 @@ Give the windowId of the passage that best supports the claim (or the closest on
 Return JSON: {"results": [{"id": string, "verdict": "supported" | "partial" | "unsupported", "windowId": number}]}`,
     body,
     0,
+    1000,
   );
   const results = new Map<string, { verdict: Verdict; evidenceWindowId: number }>();
   for (const r of arr(obj(data).results)) {
@@ -175,7 +183,7 @@ export async function reviser(items: { id: string; text: string; verdict: Verdic
   const body = items
     .map(
       (it) =>
-        `<claim id="${it.id}" verdict="${it.verdict}">${it.text}</claim>\n${it.evidence.map((w) => `<evidence>${w.text}</evidence>`).join("\n")}`,
+        `<claim id="${it.id}" verdict="${it.verdict}">${it.text}</claim>\n${it.evidence.map((w) => `<evidence>${w.text.slice(0, 700)}</evidence>`).join("\n")}`,
     )
     .join("\n\n");
   const { data, model } = await askJSON<unknown>(
@@ -184,6 +192,7 @@ export async function reviser(items: { id: string; text: string; verdict: Verdic
 Return JSON: {"revisions": [{"id": string, "text": string | null}]}`,
     body,
     0.2,
+    1500,
   );
   const out = new Map<string, string | null>();
   for (const r of arr(obj(data).revisions)) {
@@ -210,6 +219,7 @@ export async function tutor(input: { chapters: Chapter[]; concepts: Concept[]; m
 Return JSON: {"flashcards": [{"front": string, "back": string, "chapter": number}], "quiz": [{"question": string, "options": [string, string, string, string], "answer": 0-3, "explanation": string, "chapter": number}]}`,
     ctx,
     0.4,
+    3500,
   );
   const d = obj(data);
   const startOf = (ch: number) => input.chapters.find((c) => c.index === ch)?.start ?? 0;
