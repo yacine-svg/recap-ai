@@ -994,3 +994,32 @@ li.done .dot {
     animation: none;
   }
 }
+
+/* ---------- confirmation dialog ---------- */
+.modal-back {
+  position: fixed;
+  inset: 0;
+  z-index: 90; /* under the custom cursor (100) */
+  display: grid;
+  place-items: center;
+  padding: var(--gutter);
+  background: rgba(7, 9, 30, 0.72);
+  backdrop-filter: blur(6px);
+}
+.modal {
+  width: 100%;
+  max-width: 440px;
+  background: var(--night-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-m);
+  padding: 32px;
+}
+button.danger {
+  background: var(--red);
+  border-color: var(--red);
+  color: #2a0603;
+}
+button.danger:hover {
+  background: var(--paper);
+  border-color: var(--paper);
+}

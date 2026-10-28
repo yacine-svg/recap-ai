@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import Player, { type PlayerHandle } from "@/components/Player";
 import { formatTime } from "@/lib/pipeline/text";
 import { MODE_LABELS, type Claim, type Recap } from "@/lib/types";
@@ -306,6 +307,8 @@ function OwnerActions({ recap }: { recap: Recap }) {
   const router = useRouter();
   const [isPublic, setPublic] = useState(recap.is_public);
   const [copied, setCopied] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const shareUrl = typeof window !== "undefined" ? `${window.location.origin}/r/${recap.id}` : `/r/${recap.id}`;
 
   async function toggle() {
@@ -318,12 +321,12 @@ function OwnerActions({ recap }: { recap: Recap }) {
     if (res.ok) setPublic(next);
   }
   async function remove() {
-    if (!confirm("Delete this recap for good?")) return;
+    setDeleting(true);
     const res = await fetch(`/api/recaps/${recap.id}`, { method: "DELETE" });
     if (res.ok) {
       router.push("/app");
       router.refresh();
-    }
+    } else setDeleting(false);
   }
   return (
     <div className="row">
@@ -340,9 +343,18 @@ function OwnerActions({ recap }: { recap: Recap }) {
           {copied ? "Copied!" : "Copy link"}
         </button>
       )}
-      <button type="button" onClick={remove}>
+      <button type="button" onClick={() => setAsking(true)}>
         Delete
       </button>
+      <ConfirmDialog
+        open={asking}
+        title="Delete this recap?"
+        body={`“${recap.title}” and its notes, flashcards and quiz will be removed for good${isPublic ? ", and its public link will stop working" : ""}.`}
+        confirmLabel="Delete recap"
+        busy={deleting}
+        onConfirm={remove}
+        onCancel={() => setAsking(false)}
+      />
     </div>
   );
 }
