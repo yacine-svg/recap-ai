@@ -21,10 +21,10 @@ Built by **Sekhri Mohammed Yassine** (MSc Artificial Intelligence & Data Science
 flowchart LR
   subgraph Browser
     F[Video file] -->|decode + resample 16 kHz<br/>silence-aware 110 s chunks| W[WAV chunks]
-    Y[YouTube URL] -->|IFrame API: duration| C[10 min clips]
+    Y[YouTube URL] -->|IFrame API: duration| C[captions, else 10 min clips]
   end
   W -->|/transcribe| G1[Whisper large-v3-turbo · Groq]
-  C -->|/transcribe| G2[Gemini reads the YouTube URL]
+  C -->|/transcribe| G2[Supadata captions · Gemini fallback]
   G1 & G2 --> T[(Transcript)]
   T --> I[Indexer<br/>windows + embeddings → pgvector]
   I --> S[Scout<br/>TextTiling chapters + titles]
@@ -38,7 +38,7 @@ flowchart LR
 - **The video never leaves the user's device.** Audio is decoded and resampled in the browser, cut in pauses, and sent as ~3.5 MB WAV pieces (under the 4.5 MB serverless body limit).
 - **The pipeline is a state machine.** Each `/api/recaps/:id/step` call runs one stage and saves it, so requests stay short, progress survives a closed tab, and a failed stage can be retried. An optimistic lock (`update … where status = current`) stops two tabs from running the same stage twice.
 - **Model routing within free tiers.** Groq's free plan allows ~8k tokens per minute *per model*, so prompts are budgeted to ~5k tokens and each agent has a chain of models (gpt-oss-120b → Llama 3.3 70B → gpt-oss-20b, or the reverse for fast agents). On a rate limit the call waits if the wait is short, otherwise it moves to the next model. Gemini joins the chain when its key has access.
-- **Runs on one free key.** Only `GROQ_API_KEY` is required. A Gemini key is optional: it unlocks YouTube links and neural embeddings.
+- **Runs on free keys.** `GROQ_API_KEY` powers transcription and all agents. YouTube links use the video's captions through Supadata (`SUPADATA_API_KEY`, free plan), with YouTube's own caption track as a backup. A Gemini key is optional: it watches videos that have no captions and enables neural embeddings.
 - **Security.** API keys stay on the server. All data access goes through Supabase Row Level Security with the user's own session (no service-role key). There are daily quotas and a maximum duration per video.
 
 ## Tech stack

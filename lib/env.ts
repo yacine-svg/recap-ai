@@ -12,8 +12,9 @@ export const env = {
   geminiEmbedModel: () => read("GEMINI_EMBED_MODEL", "gemini-embedding-001"),
   /** "local" (TF-IDF hashing, free, no API) or "gemini" (neural embeddings, needs a Gemini key with access). */
   embeddingsProvider: () => (read("EMBEDDINGS_PROVIDER", "local") === "gemini" ? "gemini" : "local") as "local" | "gemini",
-  /** YouTube links are read by Gemini, so they need a usable Gemini key. */
-  youtubeEnabled: () => !!read("GEMINI_API_KEY") && read("YOUTUBE", "on") !== "off",
+  supadataKey: () => read("SUPADATA_API_KEY"),
+  /** YouTube links: captions via Supadata, or Gemini watching the video. */
+  youtubeEnabled: () => (!!read("SUPADATA_API_KEY") || !!read("GEMINI_API_KEY")) && read("YOUTUBE", "on") !== "off",
   dailyLimit: () => parseInt(read("RECAP_DAILY_LIMIT", "3"), 10) || 3,
   maxMinutes: () => parseInt(read("RECAP_MAX_MINUTES", "60"), 10) || 60,
 };

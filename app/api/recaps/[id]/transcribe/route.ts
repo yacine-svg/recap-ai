@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { fail, loadRecap, requireUser, userMessage } from "@/lib/api";
 import { transcribeChunk } from "@/lib/ai/groq";
+import { youtubeCaptions } from "@/lib/ai/captions";
 import { transcribeYoutubeClip } from "@/lib/ai/youtube";
+import { env } from "@/lib/env";
 
 export const maxDuration = 120;
 
@@ -10,7 +12,8 @@ const MAX_CHUNK_BYTES = 4.4 * 1024 * 1024;
 /**
  * Transcribes ONE piece of the recording and returns its segments:
  *  - uploads: a ~110 s WAV chunk cut in the browser → Whisper on Groq
- *  - YouTube: a 10 min clip → Gemini reads the video by URL
+ *  - YouTube: first the video's captions (Supadata, then YouTube directly);
+ *    if there are none and Gemini is configured, 10 min clips read by Gemini
  * Stateless on purpose: the browser collects the pieces and saves the full transcript.
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -31,7 +34,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       if (file.size > MAX_CHUNK_BYTES) return fail(413, "Audio chunk too large.");
       return NextResponse.json(await transcribeChunk(file, offset, language));
     }
-    const body = (await req.json()) as { start?: number; end?: number };
+    const body = (await req.json()) as { start?: number; end?: number; captions?: boolean };
+    if (body.captions) {
+      try {
+        const c = await youtubeCaptions(recap.source_url!);
+        return NextResponse.json({ language: c.language, segments: c.segments, complete: true, source: c.source });
+      } catch (e) {
+        // no captions: let the browser fall back to Gemini clips when a key is set
+        if (env.geminiKey()) return NextResponse.json({ language: "unknown", segments: [], complete: false, reason: (e as Error).message });
+        return fail(422, `Couldn't get this video's transcript: ${(e as Error).message}`);
+      }
+    }
     const start = Math.max(0, Number(body.start) || 0);
     const end = Math.min(recap.duration_sec ?? start + 600, Number(body.end) || start + 600);
     if (end <= start || end - start > 900) return fail(400, "Invalid clip range.");

@@ -31,13 +31,13 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 
 type Piece = { language: string; segments: Segment[] };
 
-async function saveTranscript(id: string, pieces: Piece[]) {
+async function saveTranscript(id: string, pieces: Piece[], source?: string) {
   const language = pieces.find((p) => p.language && p.language !== "unknown")?.language ?? "unknown";
   const segments = pieces.flatMap((p) => p.segments);
   await call(`/api/recaps/${id}/transcript`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ language, segments }),
+    body: JSON.stringify({ language, segments, source }),
   });
 }
 
@@ -68,6 +68,22 @@ export async function transcribeUpload(id: string, file: File, onProgress: (p: P
 }
 
 export async function transcribeYoutube(id: string, duration: number, onProgress: (p: Progress) => void) {
+  // 1. captions: one request for the whole video
+  onProgress({ phase: "transcribing", done: 0, total: 1 });
+  const cap = await withRetry(() =>
+    call<Piece & { complete?: boolean; source?: string }>(`/api/recaps/${id}/transcribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ captions: true }),
+    }),
+  );
+  if (cap.complete) {
+    onProgress({ phase: "transcribing", done: 1, total: 1 });
+    await saveTranscript(id, [cap], cap.source);
+    return;
+  }
+
+  // 2. no captions: Gemini watches the video, 10 minutes at a time
   const CLIP = 600;
   const clips: { start: number; end: number }[] = [];
   for (let s = 0; s < duration; s += CLIP) clips.push({ start: s, end: Math.min(duration, s + CLIP) });

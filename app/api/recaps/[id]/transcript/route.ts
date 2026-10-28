@@ -13,7 +13,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!recap) return fail(404, "Recap not found.");
   if (recap.status !== "transcribing") return fail(409, "This recap is already transcribed.");
 
-  const body = (await req.json().catch(() => ({}))) as { language?: unknown; segments?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { language?: unknown; segments?: unknown; source?: unknown };
+  const source = typeof body.source === "string" ? body.source.slice(0, 60) : null;
   const raw = Array.isArray(body.segments) ? (body.segments as Segment[]) : [];
   const limit = env.maxMinutes() * 60 + 60;
   const segments = cleanSegments(
@@ -42,8 +43,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           agent: "Transcriber",
           stage: "transcribing",
           ms: Math.max(0, Date.now() - new Date(recap.created_at).getTime()),
-          model: recap.source_type === "upload" ? env.groqSttModel() : env.geminiLlmModel(),
-          note: `Transcribed ${segments.length} segments (${language})${recap.source_type === "upload" ? " from audio extracted in your browser" : " from the YouTube video"}`,
+          model: recap.source_type === "upload" ? env.groqSttModel() : (source ?? env.geminiLlmModel()),
+          note: `Transcribed ${segments.length} segments (${language})${recap.source_type === "upload" ? " from audio extracted in your browser" : source ? " from the video's captions" : " by watching the YouTube video"}`,
           at: new Date().toISOString(),
         },
       ],
