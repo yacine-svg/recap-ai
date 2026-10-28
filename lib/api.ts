@@ -23,8 +23,10 @@ export async function loadRecap(db: SupabaseClient, id: string, userId: string):
 
 /** Turns provider / pipeline errors into a short message for the user. */
 export function userMessage(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e);
-  if (/429|rate limit|quota|RESOURCE_EXHAUSTED/i.test(msg)) return "The AI provider's free-tier limit was reached. Wait a minute and retry.";
-  if (/API_KEY|not set|401|403|permission/i.test(msg)) return "The AI provider rejected the request (check the API keys in the server settings).";
-  return msg.length > 240 ? `${msg.slice(0, 240)}…` : msg;
+  const raw = e instanceof Error ? e.message : String(e);
+  console.error("[recap]", raw); // full detail in the Vercel runtime logs
+  const msg = raw.length > 240 ? `${raw.slice(0, 240)}…` : raw;
+  if (/429|rate limit|quota|RESOURCE_EXHAUSTED/i.test(raw)) return `Free-tier limit reached, wait a minute and retry. (${msg})`;
+  if (/API_KEY|not set|\b401\b|\b403\b|permission/i.test(raw)) return `The AI provider refused the request; check the API key. (${msg})`;
+  return msg;
 }
