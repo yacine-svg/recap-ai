@@ -48,10 +48,16 @@ export default function NewRecap() {
       });
       const data = (await res.json()) as { id?: string; error?: string };
       if (!res.ok || !data.id) throw new Error(data.error ?? "Could not create the recap.");
+      try {
+        if (source === "upload") await transcribeUpload(data.id, file!, setProgress);
+        else await transcribeYoutube(data.id, duration, setProgress);
+      } catch (err) {
+        // a transcription that failed can't be resumed: remove it so it doesn't use up the daily quota
+        await fetch(`/api/recaps/${data.id}`, { method: "DELETE" }).catch(() => {});
+        setProgress(null);
+        throw err;
+      }
       setRecapId(data.id);
-
-      if (source === "upload") await transcribeUpload(data.id, file!, setProgress);
-      else await transcribeYoutube(data.id, duration, setProgress);
       await runAgents(data.id, "embedding", setProgress);
       router.push(`/app/r/${data.id}`);
     } catch (err) {

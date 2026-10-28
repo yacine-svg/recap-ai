@@ -37,15 +37,29 @@ export type GeminiOptions = {
 };
 
 export async function geminiGenerate(o: GeminiOptions): Promise<string> {
-  const generationConfig: Record<string, unknown> = { temperature: o.temperature ?? 0.2 };
-  if (o.json) generationConfig.responseMimeType = "application/json";
-  if (o.lowMediaResolution) generationConfig.mediaResolution = "MEDIA_RESOLUTION_LOW";
   const model = o.model ?? env.geminiLlmModel();
-  const data = (await post(`models/${model}:generateContent`, {
-    systemInstruction: { parts: [{ text: o.system }] },
-    contents: [{ role: "user", parts: o.parts }],
-    generationConfig,
-  })) as {
+  const base: Record<string, unknown> = { temperature: o.temperature ?? 0.2 };
+  if (o.json) base.responseMimeType = "application/json";
+  // optional tuning: low thinking keeps Gemini 3.x fast and within free-tier token limits
+  const tuned: Record<string, unknown> = { ...base };
+  if (o.lowMediaResolution) tuned.mediaResolution = "MEDIA_RESOLUTION_LOW";
+  if (/^gemini-[3-9]/.test(model)) tuned.thinkingConfig = { thinkingLevel: "low" };
+
+  const request = (generationConfig: Record<string, unknown>) =>
+    post(`models/${model}:generateContent`, {
+      systemInstruction: { parts: [{ text: o.system }] },
+      contents: [{ role: "user", parts: o.parts }],
+      generationConfig,
+    });
+  let raw: unknown;
+  try {
+    raw = await request(tuned);
+  } catch (e) {
+    // a model that rejects an optional setting still gets the request, without it
+    if (e instanceof ProviderError && e.status === 400 && Object.keys(tuned).length > Object.keys(base).length) raw = await request(base);
+    else throw e;
+  }
+  const data = raw as {
     candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[];
     promptFeedback?: { blockReason?: string };
   };
