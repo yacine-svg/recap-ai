@@ -20,7 +20,7 @@ export default async function RecapPage({ params }: { params: Promise<{ id: stri
   if (recap.status !== "done") {
     return (
       <div className="stack" style={{ maxWidth: 640 }}>
-        <h1>{recap.title}</h1>
+        <h1 style={{ fontSize: "clamp(1.8rem, 4vw, 2.8rem)" }}>{recap.title}</h1>
         <ResumeRecap recap={recap} />
       </div>
     );

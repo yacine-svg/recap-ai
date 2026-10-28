@@ -1,13 +1,21 @@
-import type { Metadata } from "next";
-import Link from "next/link";
+import type { Metadata, Viewport } from "next";
+import { Archivo } from "next/font/google";
 import "./globals.css";
+import Header from "@/components/Header";
+import Cursor from "@/components/fx/Cursor";
+import SmoothScroll from "@/components/fx/SmoothScroll";
 import { createClient } from "@/lib/supabase/server";
 
+// One variable family; its width axis does the typographic work (wide headlines, normal text)
+const archivo = Archivo({ subsets: ["latin", "latin-ext"], axes: ["wdth"], variable: "--font-archivo", display: "swap" });
+
 export const metadata: Metadata = {
-  title: { default: "Recap: verified AI summaries of lectures and videos", template: "%s · Recap" },
+  title: { default: "Recap: lecture notes you can trust", template: "%s · Recap" },
   description:
-    "Recap turns lectures, talks and YouTube videos into chapters, fact-checked summaries, flashcards and quizzes, with every claim linked to the moment it was said.",
+    "Recap turns lectures, talks and YouTube videos into chapters, notes, flashcards and quizzes, and checks every sentence against what was actually said.",
 };
+
+export const viewport: Viewport = { themeColor: "#0d1033", colorScheme: "dark" };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const db = await createClient();
@@ -15,36 +23,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     data: { user },
   } = await db.auth.getUser();
   return (
-    <html lang="en">
+    <html lang="en" className={archivo.variable}>
       <body>
-        <div className="wrap">
-          <header className="top">
-            <Link className="brand" href="/">
-              Recap
-            </Link>
-            <nav>
-              {user ? (
-                <>
-                  <Link href="/app">My recaps</Link>
-                  <Link className="btn primary" href="/app/new">
-                    New recap
-                  </Link>
-                  <form action="/auth/signout" method="post">
-                    <button type="submit">Sign out</button>
-                  </form>
-                </>
-              ) : (
-                <Link className="btn primary" href="/login">
-                  Sign in
-                </Link>
-              )}
-            </nav>
-          </header>
-          <main>{children}</main>
-          <footer className="muted small" style={{ padding: "40px 0" }}>
-            Recap · built by Sekhri Mohammed Yassine
-          </footer>
-        </div>
+        <SmoothScroll>
+          <Header signedIn={!!user} />
+          {children}
+        </SmoothScroll>
+        <Cursor />
       </body>
     </html>
   );

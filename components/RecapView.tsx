@@ -17,7 +17,7 @@ export default function RecapView({ recap, editable }: { recap: Recap; editable:
   const seek = (t?: number) => t !== undefined && player.current?.seek(t);
   const T = ({ t }: { t?: number }) =>
     t === undefined ? null : (
-      <button type="button" className="chip" onClick={() => seek(t)} title="Play from here">
+      <button type="button" className="chip" onClick={() => seek(t)} title="Play from here" data-cursor={`▶ play from ${formatTime(t)}`}>
         ▶ {formatTime(t)}
       </button>
     );
@@ -25,14 +25,19 @@ export default function RecapView({ recap, editable }: { recap: Recap; editable:
   return (
     <div className="stack">
       <div className="row">
-        <h1 style={{ margin: 0, flex: "1 1 400px" }}>{recap.title}</h1>
+        <h1 style={{ margin: 0, flex: "1 1 400px", fontSize: "clamp(1.8rem, 4vw, 3rem)" }}>{recap.title}</h1>
         {editable && <OwnerActions recap={recap} />}
       </div>
-      <p className="muted small" style={{ margin: 0 }}>
-        {MODE_LABELS[recap.mode]?.label} · {recap.duration_sec ? formatTime(recap.duration_sec) : ""}
-        {recap.focus ? ` · Focus: “${recap.focus}”` : ""}
-        {recap.verification ? ` · Faithfulness ${Math.round(recap.verification.after * 100)}%` : ""}
-      </p>
+      <div className="row" style={{ gap: 8 }}>
+        {recap.verification && (
+          <span className="chip verdict-supported" title="Share of sentences supported by the video">
+            {Math.round(recap.verification.after * 100)}% verified
+          </span>
+        )}
+        <span className="chip">{MODE_LABELS[recap.mode]?.label}</span>
+        {recap.duration_sec ? <span className="chip">{formatTime(recap.duration_sec)} video</span> : null}
+        {recap.focus && <span className="muted small">Your question: “{recap.focus}”</span>}
+      </div>
 
       <div className="grid2">
         <div className="stack">
@@ -114,7 +119,7 @@ function ClaimLine({ c, T }: { c: Claim; T: TProps["T"] }) {
       {c.text}{" "}
       <span className={`chip verdict-${v}`} title={c.original ? `Revised by the Verifier. First draft: “${c.original}”` : undefined}>
         {VERDICT_LABEL[v]}
-        {c.original ? " · revised" : ""}
+        {c.original ? ", revised" : ""}
       </span>{" "}
       <T t={c.evidenceStart} />
     </li>
@@ -153,7 +158,7 @@ function Flashcards({ recap, T }: TProps) {
     <div className="stack">
       <div className="panel card" onClick={() => setFlipped(!flipped)} role="button" tabIndex={0} onKeyDown={(e) => e.key === " " && setFlipped(!flipped)}>
         <div>
-          <p className="muted small">{flipped ? "Answer" : "Question"} · click to flip</p>
+          <p className="muted small">{flipped ? "Answer" : "Question"}, click to flip</p>
           <p style={{ fontSize: "1.1rem" }}>{flipped ? c.back : c.front}</p>
         </div>
       </div>
@@ -274,7 +279,7 @@ function TraceTab({ recap }: { recap: Recap }) {
             Faithfulness of the first draft: <b>{Math.round(v.before * 100)}%</b> → after self-correction: <b>{Math.round(v.after * 100)}%</b>
             <br />
             <span className="muted small">
-              {v.counts.supported} verified · {v.counts.partial} partly verified · {v.counts.unsupported} not found · {v.revised} claims rewritten by the
+              {v.counts.supported} verified, {v.counts.partial} partly verified, {v.counts.unsupported} not found; {v.revised} sentences rewritten by the
               Writer. Score = (verified + ½ × partial) / claims, judged against the 3 most similar transcript passages of each claim.
             </span>
           </p>
@@ -284,7 +289,9 @@ function TraceTab({ recap }: { recap: Recap }) {
       <ol className="list">
         {recap.trace.map((t, i) => (
           <li key={i}>
-            <b>{t.agent}</b> <span className="muted small">· {(t.ms / 1000).toFixed(1)} s{t.model ? ` · ${t.model}` : ""}</span>
+            <b>{t.agent}</b> <span className="muted small">
+              {(t.ms / 1000).toFixed(1)} s{t.model ? `, ${t.model}` : ""}
+            </span>
             <p className="muted small" style={{ margin: "4px 0 0" }}>
               {t.note}
             </p>

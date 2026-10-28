@@ -69,7 +69,10 @@ export default function NewRecapForm({ youtube }: { youtube: boolean }) {
   return (
     <div className="grid2">
       <form className="panel stack" onSubmit={start}>
-        <h1 style={{ margin: 0 }}>New recap</h1>
+        <div>
+          <h1 style={{ fontSize: "clamp(2rem, 4vw, 2.8rem)" }}>New recap</h1>
+          <p className="muted" style={{ marginTop: 8 }}>A 10-minute video takes about a minute. Keep this tab open while the agents work.</p>
+        </div>
         <div className="tabs" role="tablist">
           <button type="button" role="tab" aria-selected={source === "upload"} onClick={() => setSource("upload")} disabled={busy}>
             Upload a file
