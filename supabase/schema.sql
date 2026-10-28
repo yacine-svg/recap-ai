@@ -56,6 +56,13 @@ drop trigger if exists recaps_touch on public.recaps;
 create trigger recaps_touch before update on public.recaps
   for each row execute function public.touch_updated_at();
 
+-- Explicit grants (works when "Automatically expose new tables" is off).
+-- RLS policies below still decide WHICH rows each user can touch.
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on public.recaps to authenticated;
+grant select on public.recaps to anon; -- public share links for visitors without an account
+grant select, insert, update, delete on public.recap_windows to authenticated;
+
 alter table public.recaps enable row level security;
 alter table public.recap_windows enable row level security;
 
