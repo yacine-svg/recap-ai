@@ -4,6 +4,7 @@ import "./globals.css";
 import Header from "@/components/Header";
 import Cursor from "@/components/fx/Cursor";
 import SmoothScroll from "@/components/fx/SmoothScroll";
+import { GUEST_MODE } from "@/lib/guest";
 import { createClient } from "@/lib/supabase/server";
 
 // One variable family; its width axis does the typographic work (wide headlines, normal text)
@@ -18,15 +19,19 @@ export const metadata: Metadata = {
 export const viewport: Viewport = { themeColor: "#0d1033", colorScheme: "dark" };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const db = await createClient();
-  const {
-    data: { user },
-  } = await db.auth.getUser();
+  let signedIn = false;
+  if (!GUEST_MODE) {
+    const db = await createClient();
+    const {
+      data: { user },
+    } = await db.auth.getUser();
+    signedIn = !!user;
+  }
   return (
     <html lang="en" className={archivo.variable}>
       <body>
         <SmoothScroll>
-          <Header signedIn={!!user} />
+          <Header signedIn={signedIn} guest={GUEST_MODE} />
           {children}
         </SmoothScroll>
         <Cursor />

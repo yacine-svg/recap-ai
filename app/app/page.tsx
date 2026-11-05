@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import Magnetic from "@/components/fx/Magnetic";
+import GuestDashboard from "@/components/guest/GuestDashboard";
+import { GUEST_MODE } from "@/lib/guest";
 import { env } from "@/lib/env";
 import { formatTime } from "@/lib/pipeline/text";
 import { createClient } from "@/lib/supabase/server";
@@ -22,6 +24,7 @@ function Status({ r }: { r: Row }) {
 }
 
 export default async function Dashboard() {
+  if (GUEST_MODE) return <GuestDashboard dailyLimit={env.dailyLimit()} maxMinutes={env.maxMinutes()} />;
   const db = await createClient();
   const {
     data: { user },

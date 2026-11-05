@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import RecapView from "@/components/RecapView";
+import { GUEST_MODE } from "@/lib/guest";
 import { createClient } from "@/lib/supabase/server";
 import type { Recap } from "@/lib/types";
 
 /* Public share page: readable by anyone once the owner turned the link on (enforced by RLS). */
 
 async function load(id: string): Promise<Recap | null> {
-  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  if (GUEST_MODE || !/^[0-9a-f-]{36}$/i.test(id)) return null; // public links need the database
   const db = await createClient();
   const { data } = await db.from("recaps").select("*").eq("id", id).eq("is_public", true).eq("status", "done").maybeSingle();
   return (data as Recap | null) ?? null;

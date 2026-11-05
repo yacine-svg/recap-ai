@@ -7,6 +7,7 @@ import UnicornScene from "@/components/fx/UnicornScene";
 import AgentScroll from "@/components/landing/AgentScroll";
 import TapeDemo from "@/components/landing/TapeDemo";
 import { env } from "@/lib/env";
+import { GUEST_MODE } from "@/lib/guest";
 import { createClient } from "@/lib/supabase/server";
 import { MODE_LABELS } from "@/lib/types";
 
@@ -35,12 +36,16 @@ const FAQ = [
 ];
 
 export default async function Home() {
-  const db = await createClient();
-  const {
-    data: { user },
-  } = await db.auth.getUser();
-  const start = user ? "/app/new" : "/login?mode=signup";
-  const sample = process.env.NEXT_PUBLIC_SAMPLE_RECAP_ID;
+  let start = "/app/new";
+  if (!GUEST_MODE) {
+    const db = await createClient();
+    const {
+      data: { user },
+    } = await db.auth.getUser();
+    if (!user) start = "/login?mode=signup";
+  }
+  // the sample is a public recap in the database
+  const sample = GUEST_MODE ? undefined : process.env.NEXT_PUBLIC_SAMPLE_RECAP_ID;
 
   return (
     <>

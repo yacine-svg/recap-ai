@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { deleteGuestRecap } from "@/lib/client/guest-store";
 import Player, { type PlayerHandle } from "@/components/Player";
 import { formatTime } from "@/lib/pipeline/text";
 import { MODE_LABELS, type Claim, type Recap } from "@/lib/types";
@@ -12,7 +13,7 @@ type Tab = (typeof TABS)[number];
 
 const VERDICT_LABEL = { supported: "verified", partial: "partly verified", unsupported: "not found in video" } as const;
 
-export default function RecapView({ recap, editable }: { recap: Recap; editable: boolean }) {
+export default function RecapView({ recap, editable, guest = false }: { recap: Recap; editable: boolean; guest?: boolean }) {
   const player = useRef<PlayerHandle>(null);
   const [tab, setTab] = useState<Tab>("Summary");
   const seek = (t?: number) => t !== undefined && player.current?.seek(t);
@@ -27,7 +28,7 @@ export default function RecapView({ recap, editable }: { recap: Recap; editable:
     <div className="stack">
       <div className="row">
         <h1 style={{ margin: 0, flex: "1 1 400px", fontSize: "clamp(1.8rem, 4vw, 3rem)" }}>{recap.title}</h1>
-        {editable && <OwnerActions recap={recap} />}
+        {editable && <OwnerActions recap={recap} guest={guest} />}
       </div>
       <div className="row" style={{ gap: 8 }}>
         {recap.verification && (
@@ -303,7 +304,7 @@ function TraceTab({ recap }: { recap: Recap }) {
   );
 }
 
-function OwnerActions({ recap }: { recap: Recap }) {
+function OwnerActions({ recap, guest }: { recap: Recap; guest: boolean }) {
   const router = useRouter();
   const [isPublic, setPublic] = useState(recap.is_public);
   const [copied, setCopied] = useState(false);
@@ -322,6 +323,11 @@ function OwnerActions({ recap }: { recap: Recap }) {
   }
   async function remove() {
     setDeleting(true);
+    if (guest) {
+      deleteGuestRecap(recap.id);
+      router.push("/app");
+      return;
+    }
     const res = await fetch(`/api/recaps/${recap.id}`, { method: "DELETE" });
     if (res.ok) {
       router.push("/app");
@@ -330,9 +336,12 @@ function OwnerActions({ recap }: { recap: Recap }) {
   }
   return (
     <div className="row">
-      <button type="button" onClick={toggle}>
-        {isPublic ? "Public link: on" : "Make public link"}
-      </button>
+      {/* public links need the database; guest recaps only exist in this browser */}
+      {!guest && (
+        <button type="button" onClick={toggle}>
+          {isPublic ? "Public link: on" : "Make public link"}
+        </button>
+      )}
       {isPublic && (
         <button
           type="button"

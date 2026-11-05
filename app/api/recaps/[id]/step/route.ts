@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { fail, loadRecap, requireUser, userMessage } from "@/lib/api";
-import { isRunnable, runStage } from "@/lib/pipeline/run";
+import { dbWindowStore, isRunnable, runStage } from "@/lib/pipeline/run";
 
 export const maxDuration = 300;
 
@@ -15,7 +15,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   if (!isRunnable(recap.status)) return fail(409, `Cannot continue from "${recap.status}".`);
 
   try {
-    const update = await runStage(auth.db, recap);
+    const update = await runStage(dbWindowStore(auth.db), recap);
     // .eq(status) = optimistic lock: if another tab already ran this stage, we don't overwrite it
     const { data, error } = await auth.db
       .from("recaps")

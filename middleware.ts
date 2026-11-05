@@ -1,8 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { GUEST_MODE } from "@/lib/guest";
 
 /** Refreshes the Supabase session on every request and protects /app. */
 export async function middleware(request: NextRequest) {
+  if (GUEST_MODE) {
+    // no accounts (and no Supabase calls) while guest mode is on
+    const path = request.nextUrl.pathname;
+    if (path.startsWith("/login") || path.startsWith("/auth")) return NextResponse.redirect(new URL("/app", request.url));
+    return NextResponse.next();
+  }
   let response = NextResponse.next({ request });
   const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {

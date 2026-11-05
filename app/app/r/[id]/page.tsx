@@ -1,12 +1,15 @@
 import { notFound, redirect } from "next/navigation";
 import RecapView from "@/components/RecapView";
 import ResumeRecap from "@/components/ResumeRecap";
+import GuestRecap from "@/components/guest/GuestRecap";
+import { GUEST_MODE } from "@/lib/guest";
 import { createClient } from "@/lib/supabase/server";
 import type { Recap } from "@/lib/types";
 
 export default async function RecapPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
+  if (GUEST_MODE) return <GuestRecap id={id} />;
   const db = await createClient();
   const {
     data: { user },

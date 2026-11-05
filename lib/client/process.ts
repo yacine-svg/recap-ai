@@ -31,17 +31,33 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 
 type Piece = { language: string; segments: Segment[] };
 
-async function saveTranscript(id: string, pieces: Piece[], source?: string) {
-  const language = pieces.find((p) => p.language && p.language !== "unknown")?.language ?? "unknown";
-  const segments = pieces.flatMap((p) => p.segments);
-  await call(`/api/recaps/${id}/transcript`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ language, segments, source }),
-  });
+/** The calls a recap needs: the signed-in API (Supabase) or the guest API (browser storage). */
+export type RecapApi = {
+  transcribe(payload: FormData | Record<string, unknown>): Promise<unknown>;
+  saveTranscript(body: { language: string; segments: Segment[]; source?: string }): Promise<void>;
+  step(): Promise<Status>;
+};
+
+const json = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+export function serverApi(id: string): RecapApi {
+  return {
+    transcribe: (payload) =>
+      call(`/api/recaps/${id}/transcribe`, payload instanceof FormData ? { method: "POST", body: payload } : json(payload)),
+    saveTranscript: async (body) => {
+      await call(`/api/recaps/${id}/transcript`, json(body));
+    },
+    step: async () => (await call<{ status: Status }>(`/api/recaps/${id}/step`, { method: "POST" })).status,
+  };
 }
 
-export async function transcribeUpload(id: string, file: File, onProgress: (p: Progress) => void) {
+async function saveTranscript(api: RecapApi, pieces: Piece[], source?: string) {
+  const language = pieces.find((p) => p.language && p.language !== "unknown")?.language ?? "unknown";
+  const segments = pieces.flatMap((p) => p.segments);
+  await api.saveTranscript({ language, segments, source });
+}
+
+export async function transcribeUpload(api: RecapApi, file: File, onProgress: (p: Progress) => void) {
   onProgress({ phase: "extracting", done: 0, total: 1 });
   const { chunks } = await extractAudioChunks(file);
   const pieces: Piece[] = new Array(chunks.length);
@@ -58,28 +74,22 @@ export async function transcribeUpload(id: string, file: File, onProgress: (p: P
         const form = new FormData();
         form.append("file", c.blob, `chunk-${i}.wav`);
         form.append("offset", String(c.offset));
-        return call<Piece>(`/api/recaps/${id}/transcribe`, { method: "POST", body: form });
+        return api.transcribe(form) as Promise<Piece>;
       });
       onProgress({ phase: "transcribing", done: ++done, total: chunks.length });
     }
   };
   await Promise.all([worker(), worker()]);
-  await saveTranscript(id, pieces);
+  await saveTranscript(api, pieces);
 }
 
-export async function transcribeYoutube(id: string, duration: number, onProgress: (p: Progress) => void) {
+export async function transcribeYoutube(api: RecapApi, duration: number, onProgress: (p: Progress) => void) {
   // 1. captions: one request for the whole video
   onProgress({ phase: "transcribing", done: 0, total: 1 });
-  const cap = await withRetry(() =>
-    call<Piece & { complete?: boolean; source?: string }>(`/api/recaps/${id}/transcribe`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ captions: true }),
-    }),
-  );
+  const cap = await withRetry(() => api.transcribe({ captions: true }) as Promise<Piece & { complete?: boolean; source?: string }>);
   if (cap.complete) {
     onProgress({ phase: "transcribing", done: 1, total: 1 });
-    await saveTranscript(id, [cap], cap.source);
+    await saveTranscript(api, [cap], cap.source);
     return;
   }
 
@@ -90,31 +100,22 @@ export async function transcribeYoutube(id: string, duration: number, onProgress
   const pieces: Piece[] = [];
   onProgress({ phase: "transcribing", done: 0, total: clips.length });
   for (const [i, clip] of clips.entries()) {
-    pieces.push(
-      await withRetry(() =>
-        call<Piece>(`/api/recaps/${id}/transcribe`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(clip),
-        }),
-      ),
-    );
+    pieces.push(await withRetry(() => api.transcribe(clip) as Promise<Piece>));
     onProgress({ phase: "transcribing", done: i + 1, total: clips.length });
   }
-  await saveTranscript(id, pieces);
+  await saveTranscript(api, pieces);
 }
 
 const AGENT_STAGES: Status[] = ["embedding", "structuring", "analyzing", "writing", "verifying", "studying", "done"];
 
 /** Calls /step until the recap is done. Safe to call again after a failure: it resumes. */
-export async function runAgents(id: string, from: Status, onProgress: (p: Progress) => void) {
+export async function runAgents(api: RecapApi, from: Status, onProgress: (p: Progress) => void) {
   let status = from;
   let guard = 0;
   while (status !== "done") {
     if (++guard > 20) throw new Error("The pipeline is not advancing; please retry.");
     onProgress({ phase: "agents", done: Math.max(0, AGENT_STAGES.indexOf(status)), total: AGENT_STAGES.length - 1, status });
-    const res = await withRetry(() => call<{ status: Status }>(`/api/recaps/${id}/step`, { method: "POST" }));
-    status = res.status;
+    status = await withRetry(() => api.step());
   }
   onProgress({ phase: "agents", done: AGENT_STAGES.length - 1, total: AGENT_STAGES.length - 1, status: "done" });
 }

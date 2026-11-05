@@ -29,8 +29,69 @@ import { parseVector, topK, toPgVector } from "./vector";
  * transcribing (browser) → embedding → structuring → analyzing → writing → verifying → studying → done
  */
 
-type Update = Partial<Omit<Recap, "id" | "user_id" | "created_at">>;
-type Ctx = { db: SupabaseClient; recap: Recap };
+export type Update = Partial<Omit<Recap, "id" | "user_id" | "created_at">>;
+
+/** Where the vectorised transcript windows live between stages. */
+export type WindowStore = {
+  load(recap: Recap): Promise<EmbeddedWindow[]>;
+  save(recap: Recap, windows: EmbeddedWindow[]): Promise<void>;
+  /** embeddings provider to index with (guests are always "local") */
+  provider(): "local" | "gemini";
+};
+
+type Ctx = { store: WindowStore; recap: Recap };
+
+/** Signed-in users: windows saved in the recap_windows table. */
+export function dbWindowStore(db: SupabaseClient): WindowStore {
+  return {
+    provider: () => env.embeddingsProvider(),
+    async load(recap) {
+      const { data, error } = await db
+        .from("recap_windows")
+        .select("idx,start_sec,end_sec,text,embedding")
+        .eq("recap_id", recap.id)
+        .order("idx");
+      if (error) throw new Error(`Could not load transcript index: ${error.message}`);
+      return (data ?? []).map((r) => ({
+        idx: r.idx as number,
+        start: r.start_sec as number,
+        end: r.end_sec as number,
+        text: r.text as string,
+        embedding: parseVector(r.embedding),
+      }));
+    },
+    async save(recap, windows) {
+      await db.from("recap_windows").delete().eq("recap_id", recap.id);
+      const rows = windows.map((w) => ({
+        recap_id: recap.id,
+        idx: w.idx,
+        start_sec: w.start,
+        end_sec: w.end,
+        text: w.text,
+        embedding: toPgVector(w.embedding),
+      }));
+      for (let i = 0; i < rows.length; i += 200) {
+        const { error } = await db.from("recap_windows").insert(rows.slice(i, i + 200));
+        if (error) throw new Error(`Could not save transcript index: ${error.message}`);
+      }
+    },
+  };
+}
+
+/**
+ * Guests (no database): the local TF-IDF index is deterministic, so every stage
+ * simply rebuilds it from the transcript the browser sends along.
+ */
+export const recomputedWindowStore: WindowStore = {
+  provider: () => "local",
+  async load(recap) {
+    const windows = buildWindows(recap.transcript?.segments ?? []);
+    const texts = windows.map((w) => w.text);
+    const vectors = new LexicalIndex(texts).vectors(texts);
+    return windows.map((w, i) => ({ ...w, embedding: vectors[i] }));
+  },
+  async save() {},
+};
 
 const NEXT: Record<Exclude<Stage, "transcribing" | "done">, Stage> = {
   embedding: "structuring",
@@ -45,21 +106,7 @@ function trace(agent: TraceEntry["agent"], stage: Stage, t0: number, note: strin
   return { agent, stage, ms: Date.now() - t0, model, note, at: new Date().toISOString() };
 }
 
-async function loadWindows(ctx: Ctx): Promise<EmbeddedWindow[]> {
-  const { data, error } = await ctx.db
-    .from("recap_windows")
-    .select("idx,start_sec,end_sec,text,embedding")
-    .eq("recap_id", ctx.recap.id)
-    .order("idx");
-  if (error) throw new Error(`Could not load transcript index: ${error.message}`);
-  return (data ?? []).map((r) => ({
-    idx: r.idx as number,
-    start: r.start_sec as number,
-    end: r.end_sec as number,
-    text: r.text as string,
-    embedding: parseVector(r.embedding),
-  }));
-}
+const loadWindows = (ctx: Ctx) => ctx.store.load(ctx.recap);
 
 /** Vectors for queries (focus question, claims) in the same space as the stored windows. */
 async function queryVectors(ctx: Ctx, windows: EmbeddedWindow[], texts: string[]): Promise<number[][]> {
@@ -76,22 +123,13 @@ async function indexTranscript(ctx: Ctx): Promise<Update> {
   const segments = ctx.recap.transcript?.segments ?? [];
   const windows = buildWindows(segments);
   if (!windows.length) throw new Error("The transcript is empty: no speech was detected in this video.");
-  const mode = env.embeddingsProvider();
+  const mode = ctx.store.provider();
   const texts = windows.map((w) => w.text);
   const vectors = mode === "gemini" ? await embed(texts, "RETRIEVAL_DOCUMENT") : new LexicalIndex(texts).vectors(texts);
-  await ctx.db.from("recap_windows").delete().eq("recap_id", ctx.recap.id);
-  const rows = windows.map((w, i) => ({
-    recap_id: ctx.recap.id,
-    idx: w.idx,
-    start_sec: w.start,
-    end_sec: w.end,
-    text: w.text,
-    embedding: toPgVector(vectors[i]),
-  }));
-  for (let i = 0; i < rows.length; i += 200) {
-    const { error } = await ctx.db.from("recap_windows").insert(rows.slice(i, i + 200));
-    if (error) throw new Error(`Could not save transcript index: ${error.message}`);
-  }
+  await ctx.store.save(
+    ctx.recap,
+    windows.map((w, i) => ({ ...w, embedding: vectors[i] })),
+  );
   return {
     transcript: { ...ctx.recap.transcript!, index: mode },
     trace: [
@@ -371,8 +409,8 @@ export function isRunnable(status: string): status is keyof typeof NEXT {
 }
 
 /** Runs the recap's current stage and returns what to save (including the next status). */
-export async function runStage(db: SupabaseClient, recap: Recap): Promise<Update> {
+export async function runStage(store: WindowStore, recap: Recap): Promise<Update> {
   if (!isRunnable(recap.status)) throw new Error(`Nothing to run in status "${recap.status}"`);
-  const update = await HANDLERS[recap.status]({ db, recap });
+  const update = await HANDLERS[recap.status]({ store, recap });
   return { ...update, status: NEXT[recap.status], error: null };
 }

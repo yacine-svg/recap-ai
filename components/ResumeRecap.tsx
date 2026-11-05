@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import PipelineProgress from "@/components/PipelineProgress";
-import { runAgents, type Progress } from "@/lib/client/process";
+import { deleteGuestRecap, guestApi } from "@/lib/client/guest-store";
+import { runAgents, serverApi, type Progress } from "@/lib/client/process";
 import type { Recap } from "@/lib/types";
 
 /** Shown for a recap that isn't finished: continues the agents where they stopped. */
-export default function ResumeRecap({ recap }: { recap: Pick<Recap, "id" | "status" | "error" | "source_type"> }) {
+export default function ResumeRecap({ recap, guest = false }: { recap: Pick<Recap, "id" | "status" | "error" | "source_type">; guest?: boolean }) {
   const router = useRouter();
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(recap.error);
@@ -18,8 +19,8 @@ export default function ResumeRecap({ recap }: { recap: Pick<Recap, "id" | "stat
     setRunning(true);
     setError(null);
     try {
-      await runAgents(recap.id, recap.status, setProgress);
-      router.refresh();
+      await runAgents(guest ? guestApi(recap.id) : serverApi(recap.id), recap.status, setProgress);
+      if (!guest) router.refresh(); // guests: the page re-reads browser storage on its own
     } catch (e) {
       setError((e as Error).message);
       setRunning(false);
@@ -41,7 +42,7 @@ export default function ResumeRecap({ recap }: { recap: Pick<Recap, "id" | "stat
           {recap.error ?? "The transcription was interrupted (the tab was closed before it finished)."}
         </p>
         <p className="muted small">Delete this recap and create it again{recap.source_type === "upload" ? " with the same file" : ""}.</p>
-        <DeleteButton id={recap.id} />
+        <DeleteButton id={recap.id} guest={guest} />
       </div>
     );
   }
@@ -59,13 +60,14 @@ export default function ResumeRecap({ recap }: { recap: Pick<Recap, "id" | "stat
   );
 }
 
-function DeleteButton({ id }: { id: string }) {
+function DeleteButton({ id, guest }: { id: string; guest: boolean }) {
   const router = useRouter();
   return (
     <button
       type="button"
       onClick={async () => {
-        await fetch(`/api/recaps/${id}`, { method: "DELETE" });
+        if (guest) deleteGuestRecap(id);
+        else await fetch(`/api/recaps/${id}`, { method: "DELETE" });
         router.push("/app/new");
       }}
     >

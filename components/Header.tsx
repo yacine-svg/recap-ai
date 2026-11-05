@@ -15,7 +15,7 @@ export function Logo() {
   );
 }
 
-export default function Header({ signedIn }: { signedIn: boolean }) {
+export default function Header({ signedIn, guest = false }: { signedIn: boolean; guest?: boolean }) {
   const [solid, setSolid] = useState(false);
   const path = usePathname();
   useEffect(() => {
@@ -33,7 +33,16 @@ export default function Header({ signedIn }: { signedIn: boolean }) {
         Recap
       </Link>
       <nav aria-label="Main">
-        {signedIn ? (
+        {guest ? (
+          <>
+            <Link href="/app">My recaps</Link>
+            <Magnetic>
+              <Link className="btn primary" href="/app/new">
+                New recap
+              </Link>
+            </Magnetic>
+          </>
+        ) : signedIn ? (
           <>
             <Link href="/app">My recaps</Link>
             <form action="/auth/signout" method="post" className="hide-sm">

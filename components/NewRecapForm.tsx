@@ -4,12 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import PipelineProgress from "@/components/PipelineProgress";
 import { mediaDuration } from "@/lib/audio/extract";
-import { runAgents, transcribeUpload, transcribeYoutube, type Progress } from "@/lib/client/process";
+import { createGuestRecap, deleteGuestRecap, guestApi } from "@/lib/client/guest-store";
+import { runAgents, serverApi, transcribeUpload, transcribeYoutube, type Progress } from "@/lib/client/process";
 import { youtubeInfo } from "@/lib/client/youtube";
 import { youtubeId } from "@/lib/pipeline/text";
 import { LANGUAGES, MODE_LABELS, type Mode } from "@/lib/types";
 
-export default function NewRecapForm({ youtube }: { youtube: boolean }) {
+export default function NewRecapForm({ youtube, guest = false }: { youtube: boolean; guest?: boolean }) {
   const router = useRouter();
   const [source, setSource] = useState<"upload" | "youtube">("upload");
   const [file, setFile] = useState<File | null>(null);
@@ -41,25 +42,34 @@ export default function NewRecapForm({ youtube }: { youtube: boolean }) {
         title = info.title;
       }
 
-      const res = await fetch("/api/recaps", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source_type: source, source_url: url, title, duration_sec: duration, mode, focus, output_language: lang }),
-      });
-      const data = (await res.json()) as { id?: string; error?: string };
-      if (!res.ok || !data.id) throw new Error(data.error ?? "Could not create the recap.");
+      const fields = { source_type: source, source_url: url, title, duration_sec: duration, mode, focus, output_language: lang };
+      let id: string;
+      if (guest) {
+        id = (await createGuestRecap(fields)).id;
+      } else {
+        const res = await fetch("/api/recaps", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fields),
+        });
+        const data = (await res.json()) as { id?: string; error?: string };
+        if (!res.ok || !data.id) throw new Error(data.error ?? "Could not create the recap.");
+        id = data.id;
+      }
+      const api = guest ? guestApi(id) : serverApi(id);
       try {
-        if (source === "upload") await transcribeUpload(data.id, file!, setProgress);
-        else await transcribeYoutube(data.id, duration, setProgress);
+        if (source === "upload") await transcribeUpload(api, file!, setProgress);
+        else await transcribeYoutube(api, duration, setProgress);
       } catch (err) {
         // a transcription that failed can't be resumed: remove it so it doesn't use up the daily quota
-        await fetch(`/api/recaps/${data.id}`, { method: "DELETE" }).catch(() => {});
+        if (guest) deleteGuestRecap(id);
+        else await fetch(`/api/recaps/${id}`, { method: "DELETE" }).catch(() => {});
         setProgress(null);
         throw err;
       }
-      setRecapId(data.id);
-      await runAgents(data.id, "embedding", setProgress);
-      router.push(`/app/r/${data.id}`);
+      setRecapId(id);
+      await runAgents(api, "embedding", setProgress);
+      router.push(`/app/r/${id}`);
     } catch (err) {
       setError((err as Error).message);
       setBusy(false);
